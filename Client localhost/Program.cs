@@ -15,17 +15,17 @@ class Program
 {
     static void Main()
     {
-        //Генерація приватного ключа та самопідписаного сертифіката CA
+        // Генерація приватного ключа та самопідписаного сертифіката CA
         var caKeyPair = GenerateRsaKeyPair(4096);
         var caCertificate = GenerateSelfSignedCertificate(caKeyPair, "CN=MyRootCA, O=group1, C=UA", 3650);
 
         Console.WriteLine("CA сертифікат згенеровано");
 
-        //Збереження приватного ключа та сертифіката CA
+        // Збереження приватного ключа та сертифіката CA
         SaveToPem("ca_private.key", caKeyPair.Private);
         SaveToPem("ca_certificate.pem", caCertificate);
 
-        //Генерація приватного ключа сервера та CSR
+        // Генерація приватного ключа сервера та CSR
         var serverKeyPair = GenerateEcKeyPair();
         var serverCsr = GenerateCertificateRequest(serverKeyPair, "CN=ELK, O=group1, C=UA");
         SaveToPem("server_private.key", serverKeyPair.Private);
@@ -33,13 +33,18 @@ class Program
 
         Console.WriteLine("Серверний CSR згенеровано");
 
-        //Підписання CSR сервера сертифікатом CA
+        // Підписання CSR сервера сертифікатом CA
         var serverCertificate = SignCertificateRequest(serverCsr, caCertificate, caKeyPair.Private, 365);
         SaveToPem("server_certificate.pem", serverCertificate);
 
         Console.WriteLine("Серверний сертифікат підписаний CA");
 
-        //Генерація приватного ключа клієнта та CSR
+        // Об'єднання сертифіката і ключа у формат PFX
+        SaveToPfx("ServerCertificate.pfx", serverCertificate, serverKeyPair.Private, "ThebestPassword");
+
+        Console.WriteLine("Серверний сертифікат і ключ збережені у форматі PFX");
+
+        // Генерація приватного ключа клієнта та CSR
         var clientKeyPair = GenerateEcKeyPair();
         var clientCsr = GenerateCertificateRequest(clientKeyPair, "CN=andrii, O=group1, C=UA");
         SaveToPem("client_private.key", clientKeyPair.Private);
@@ -47,12 +52,18 @@ class Program
 
         Console.WriteLine("Клієнтський CSR згенеровано");
 
-        //Підписання CSR клієнта сертифікатом CA
+        // Підписання CSR клієнта сертифікатом CA
         var clientCertificate = SignCertificateRequest(clientCsr, caCertificate, caKeyPair.Private, 365);
         SaveToPem("client_certificate.pem", clientCertificate);
 
         Console.WriteLine("Клієнтський сертифікат підписаний CA.");
+
+        // Об'єднання сертифіката і ключа клієнта у формат PFX
+        SaveToPfx("ClientCertificate.pfx", clientCertificate, clientKeyPair.Private, "BestPassword");
+
+        Console.WriteLine("Клієнтський сертифікат і ключ збережені у форматі PFX.");
     }
+
     // Генерація RSA ключової пари
     static AsymmetricCipherKeyPair GenerateRsaKeyPair(int keySize)
     {
@@ -60,6 +71,7 @@ class Program
         generator.Init(new KeyGenerationParameters(new SecureRandom(), keySize));
         return generator.GenerateKeyPair();
     }
+
     // Генерація ключової пари на основі еліптичних кривих
     static AsymmetricCipherKeyPair GenerateEcKeyPair()
     {
@@ -67,6 +79,7 @@ class Program
         generator.Init(new ECKeyGenerationParameters(SecObjectIdentifiers.SecP256r1, new SecureRandom()));
         return generator.GenerateKeyPair();
     }
+
     // Генерація самопідписаного сертифіката
     static X509Certificate GenerateSelfSignedCertificate(AsymmetricCipherKeyPair keyPair, string subjectName, int validityDays)
     {
@@ -86,6 +99,7 @@ class Program
         var signatureFactory = new Asn1SignatureFactory("SHA256WithRSA", keyPair.Private);
         return certGen.Generate(signatureFactory);
     }
+
     // Генерація запиту на сертифікат (CSR)
     static Pkcs10CertificationRequest GenerateCertificateRequest(AsymmetricCipherKeyPair keyPair, string subjectName)
     {
@@ -93,6 +107,7 @@ class Program
         var signatureFactory = new Asn1SignatureFactory("SHA256WithECDSA", keyPair.Private, new SecureRandom());
         return new Pkcs10CertificationRequest("SHA256WithECDSA", subjectDN, keyPair.Public, null, keyPair.Private);
     }
+
     // Підписання CSR для створення сертифіката
     static X509Certificate SignCertificateRequest(Pkcs10CertificationRequest csr, X509Certificate caCertificate, AsymmetricKeyParameter caPrivateKey, int validityDays)
     {
@@ -111,6 +126,7 @@ class Program
         var signatureFactory = new Asn1SignatureFactory("SHA256WithRSA", caPrivateKey);
         return certGen.Generate(signatureFactory);
     }
+
     // Збереження даних у PEM-форматі
     static void SaveToPem(string filePath, object data)
     {
@@ -118,5 +134,22 @@ class Program
         var pemWriter = new Org.BouncyCastle.OpenSsl.PemWriter(writer);
         pemWriter.WriteObject(data);
     }
+
+    // Збереження сертифіката і ключа у форматі PFX
+    static void SaveToPfx(string filePath, X509Certificate certificate, AsymmetricKeyParameter privateKey, string password)
+    {
+        // Створення нового Pkcs12Store в пам'яті
+        using var memoryStream = new MemoryStream();
+        var store = new Pkcs12StoreBuilder().Build();
+
+        var certificateEntry = new X509CertificateEntry(certificate);
+        store.SetCertificateEntry("cert", certificateEntry);
+        store.SetKeyEntry("key", new AsymmetricKeyEntry(privateKey), new[] { certificateEntry });
+
+        // Збереження в файл
+        using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
+        store.Save(fileStream, password.ToCharArray(), new SecureRandom());
+    }
 }
+
 
